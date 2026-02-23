@@ -21,6 +21,7 @@ import {
     DiceRoll,
     Move,
     MatchStats,
+    AIDifficulty,
     BOARD,
     PLAYER_COLORS,
 } from './types';
@@ -79,6 +80,7 @@ export function createGameState(
 export function createPlayers(
     matchType: MatchType,
     humanName: string = 'You',
+    aiDifficulty: AIDifficulty = 'intermediate',
 ): Player[] {
     const colors: PlayerColor[] = matchType === '1v1'
         ? ['red', 'green']
@@ -89,7 +91,7 @@ export function createPlayers(
         name: i === 0 ? humanName : (matchType === 'vs_ai' ? `AI ${i}` : `Player ${i + 1}`),
         color,
         isAI: matchType === 'vs_ai' ? i > 0 : false,
-        aiDifficulty: matchType === 'vs_ai' && i > 0 ? 'intermediate' : undefined,
+        aiDifficulty: matchType === 'vs_ai' && i > 0 ? aiDifficulty : undefined,
     }));
 }
 

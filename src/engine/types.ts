@@ -55,6 +55,25 @@ export const BOARD = {
   TOKENS_PER_PLAYER: 4,
 } as const;
 
+/** Quick Ludo — Shortened track for 5-minute games */
+export const QUICK_BOARD = {
+  TRACK_LENGTH: 28,
+  HOME_COLUMN_LENGTH: 4,
+  START_POSITIONS: {
+    red: 0,
+    green: 7,
+    yellow: 14,
+    blue: 21,
+  } as Record<PlayerColor, number>,
+  SAFE_POSITIONS: new Set<number>([0, 7, 14, 21]),
+  TOTAL_PATH_LENGTH: 31,  // 27 track cells + 4 home column cells
+  TOKENS_PER_PLAYER: 2,
+  /** Game time limit in milliseconds (5 minutes) */
+  TIME_LIMIT_MS: 5 * 60 * 1000,
+  /** Auto-spawn: first token enters automatically on game start */
+  AUTO_SPAWN: true,
+} as const;
+
 // ─── Dice ───────────────────────────────────────────────────────
 export interface DiceRoll {
   value: 1 | 2 | 3 | 4 | 5 | 6;
@@ -72,7 +91,7 @@ export interface Move {
   capturedToken?: TokenId;
 }
 
-export type MoveType = 
+export type MoveType =
   | 'spawn'       // Token leaves home yard onto start position
   | 'advance'     // Normal move along the track
   | 'capture'     // Lands on opponent token
@@ -83,7 +102,7 @@ export type MoveType =
 // ─── Game State ─────────────────────────────────────────────────
 export type GamePhase = 'waiting' | 'rolling' | 'moving' | 'animating' | 'finished';
 
-export type GameMode = 'classic' | 'speed' | 'pro' | 'casual';
+export type GameMode = 'classic' | 'speed' | 'pro' | 'casual' | 'quick';
 
 export type MatchType = '1v1' | '2v2' | 'vs_ai';
 

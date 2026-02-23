@@ -234,7 +234,7 @@ class SocketService {
         });
 
         this.socket.on('rematch_started', (data: { gameState: object }) => {
-            this.currentRoomId = this.currentRoomId; // Stay in room
+            // Stay in room — currentRoomId unchanged
             this.handlers.onRematchStarted?.(data);
         });
 

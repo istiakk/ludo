@@ -20,11 +20,13 @@ const KEYS = {
     AD_STATE: '@ludo:ad_state',
     SEASON_PASS: '@ludo:season_pass',
     PROGRESSION: '@ludo:progression',
+    ACTIVE_CREATOR_CODE: '@ludo:creator_code',
+    LAST_USED_MODE: '@ludo:last_mode',
 } as const;
 
 // ─── Generic Helpers ────────────────────────────────────────────
 
-async function getJSON<T>(key: string): Promise<T | null> {
+export async function getJSON<T>(key: string): Promise<T | null> {
     try {
         const value = await AsyncStorage.getItem(key);
         return value ? JSON.parse(value) : null;
@@ -34,7 +36,7 @@ async function getJSON<T>(key: string): Promise<T | null> {
     }
 }
 
-async function setJSON<T>(key: string, value: T): Promise<void> {
+export async function setJSON<T>(key: string, value: T): Promise<void> {
     try {
         await AsyncStorage.setItem(key, JSON.stringify(value));
     } catch (error) {
@@ -207,6 +209,52 @@ export async function getProgression(): Promise<StoredProgression> {
 
 export async function saveProgression(prog: StoredProgression): Promise<void> {
     return setJSON(KEYS.PROGRESSION, prog);
+}
+
+// ─── Season Pass ────────────────────────────────────────────────
+
+export async function getSeasonPassState(): Promise<object | null> {
+    return getJSON<object>(KEYS.SEASON_PASS);
+}
+
+export async function saveSeasonPassState(state: object): Promise<void> {
+    return setJSON(KEYS.SEASON_PASS, state);
+}
+
+// ─── Creator Code ───────────────────────────────────────────────
+
+export interface StoredCreatorCode {
+    code: string;
+    creatorName: string;
+    appliedAt: number;
+    expiresAt: number;
+}
+
+export async function getActiveCreatorCode(): Promise<StoredCreatorCode | null> {
+    return getJSON<StoredCreatorCode>(KEYS.ACTIVE_CREATOR_CODE);
+}
+
+export async function saveActiveCreatorCode(code: StoredCreatorCode | null): Promise<void> {
+    if (code === null) {
+        return removeKey(KEYS.ACTIVE_CREATOR_CODE);
+    }
+    return setJSON(KEYS.ACTIVE_CREATOR_CODE, code);
+}
+
+// ─── Last Used Mode ─────────────────────────────────────────────
+
+export interface StoredLastMode {
+    mode: string;
+    matchType: string;
+    difficulty?: string;
+}
+
+export async function getLastUsedMode(): Promise<StoredLastMode | null> {
+    return getJSON<StoredLastMode>(KEYS.LAST_USED_MODE);
+}
+
+export async function saveLastUsedMode(mode: StoredLastMode): Promise<void> {
+    return setJSON(KEYS.LAST_USED_MODE, mode);
 }
 
 // ─── Clear All ──────────────────────────────────────────────────

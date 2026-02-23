@@ -9,12 +9,14 @@
 
 import React, { useMemo, useCallback } from 'react';
 import { View, StyleSheet, Dimensions } from 'react-native';
+import Animated, { useAnimatedSensor, SensorType, useAnimatedStyle, interpolate, Extrapolation } from 'react-native-reanimated';
 import { Canvas, Group } from '@shopify/react-native-skia';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import BoardCanvas from './BoardCanvas';
 import { TokenSpriteStatic } from './TokenSprite';
 import ThreatOverlay from './ThreatOverlay';
+import ParticleSystem from './ParticleSystem';
 import { GameState, Move, TokenId, Token } from '../engine/types';
 import { getCurrentPlayer } from '../engine/GameState';
 import { getTokenCoord } from '../engine/Board';
@@ -45,6 +47,41 @@ export default function GameBoard({
     const tokenList: Token[] = useMemo(() => {
         return Object.values(gameState.tokens) as Token[];
     }, [gameState.tokens]);
+
+    // Gyro Sensor for Parallax Tabletop
+    const rotationSensor = useAnimatedSensor(SensorType.ROTATION);
+
+    const animatedBoardStyle = useAnimatedStyle(() => {
+        // Base tabletop tilt
+        const baseRotateX = 40;
+
+        if (rotationSensor.sensor.value) {
+            const { pitch, roll } = rotationSensor.sensor.value;
+            // Note: pitch/roll values vary by device orientation, but we use them as localized offsets
+            // pitch is around X-axis, roll is around Y-axis
+            const pitchDeg = (pitch * 180) / Math.PI;
+            const rollDeg = (roll * 180) / Math.PI;
+
+            // Clamp the gyro effect to prevent wild flipping if device is held oddly
+            const gyroPitch = interpolate(pitchDeg, [-45, 45], [-15, 15], Extrapolation.CLAMP);
+            const gyroRoll = interpolate(rollDeg, [-45, 45], [-15, 15], Extrapolation.CLAMP);
+
+            return {
+                transform: [
+                    { perspective: 800 },
+                    { rotateX: `${baseRotateX + gyroPitch}deg` },
+                    { rotateY: `${gyroRoll}deg` }
+                ]
+            };
+        }
+
+        return {
+            transform: [
+                { perspective: 800 },
+                { rotateX: `${baseRotateX}deg` }
+            ]
+        };
+    });
 
     // Handle tap on the board canvas to detect token selection
     const handleBoardTap = useCallback((x: number, y: number) => {
@@ -84,7 +121,7 @@ export default function GameBoard({
     return (
         <View style={styles.container}>
             <GestureDetector gesture={tapGesture}>
-                <View style={[styles.boardWrapper, { width: boardSize, height: boardSize }]}>
+                <Animated.View style={[styles.boardWrapper, { width: boardSize, height: boardSize }, animatedBoardStyle]}>
                     <Canvas style={{ width: boardSize, height: boardSize }}>
                         {/* Layer 1: Static board grid */}
                         <BoardCanvasLayer size={boardSize} cellSize={cellSize} />
@@ -108,8 +145,11 @@ export default function GameBoard({
                                 isValidTarget={validMoveTokenIds.has(token.id)}
                             />
                         ))}
+
+                        {/* Layer 4: Particle Engine (Shatters & Trails) */}
+                        <ParticleSystem tokens={gameState.tokens} cellSize={cellSize} />
                     </Canvas>
-                </View>
+                </Animated.View>
             </GestureDetector>
         </View>
     );

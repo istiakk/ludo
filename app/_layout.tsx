@@ -23,6 +23,7 @@ import {
 import { colors } from '../src/theme/design-system';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { LoadingScreen } from '../src/components/LoadingScreen';
+import { ToastContainer } from '../src/components/Toast';
 import { getProfile } from '../src/services/StorageService';
 
 // Keep splash screen visible while loading fonts
@@ -93,7 +94,12 @@ export default function RootLayout() {
                     <Stack.Screen name="settings" />
                     <Stack.Screen name="season-pass" />
                     <Stack.Screen name="share" />
+                    <Stack.Screen name="clan" />
+                    <Stack.Screen name="friend-list" />
+                    <Stack.Screen name="tournament" />
+                    <Stack.Screen name="vip" />
                 </Stack>
+                <ToastContainer />
             </View>
         </ErrorBoundary>
     );

@@ -6,7 +6,7 @@
  * SME Agent: ui-ux-pro-max, mobile-design, game-development/game-design
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -15,9 +15,12 @@ import {
     SafeAreaView,
     ScrollView,
     FlatList,
+    ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors, typography, spacing, radii, shadows } from '../src/theme/design-system';
+import { commonStyles, ON_ACCENT_COLOR } from '../src/theme/commonStyles';
+import { ScreenHeader, ProgressBar } from '../src/components/ui';
 import {
     createCurrentSeason,
     createInitialSeasonState,
@@ -30,38 +33,65 @@ import {
     Mission,
     SeasonPassState,
 } from '../src/services/SeasonPassService';
+import { getSeasonPassState, saveSeasonPassState } from '../src/services/StorageService';
 
 export default function SeasonPassScreen() {
     const router = useRouter();
+    const [loading, setLoading] = useState(true);
     const season = useMemo(() => createCurrentSeason(), []);
-    const passState = useMemo(() => createInitialSeasonState(season.id), [season.id]);
+    const [passState, setPassState] = useState<SeasonPassState>(() => createInitialSeasonState(season.id));
     const timeRemaining = useMemo(() => getSeasonTimeRemaining(season), [season]);
+
+    useEffect(() => {
+        async function load() {
+            try {
+                const saved = await getSeasonPassState();
+                if (saved) {
+                    setPassState(saved as SeasonPassState);
+                }
+            } catch (err) {
+                console.warn('[SeasonPass] Load error:', err);
+            } finally {
+                setLoading(false);
+            }
+        }
+        load();
+    }, []);
 
     const tierProgress = passState.currentTier / season.totalTiers;
     const xpProgress = passState.currentXP / season.xpPerTier;
 
-    const activeDailyMissions = DAILY_MISSION_POOL.filter(m =>
-        passState.activeDailyMissions.includes(m.id)
+    const activeDailyMissions = useMemo(() =>
+        DAILY_MISSION_POOL.filter(m => passState.activeDailyMissions.includes(m.id)),
+        [passState.activeDailyMissions]
     );
-    const activeWeeklyMissions = WEEKLY_MISSION_POOL.filter(m =>
-        passState.activeWeeklyMissions.includes(m.id)
+    const activeWeeklyMissions = useMemo(() =>
+        WEEKLY_MISSION_POOL.filter(m => passState.activeWeeklyMissions.includes(m.id)),
+        [passState.activeWeeklyMissions]
     );
 
+    if (loading) {
+        return (
+            <SafeAreaView style={commonStyles.screen}>
+                <ScreenHeader title="Season Pass" />
+                <View style={commonStyles.loadingContainer}>
+                    <ActivityIndicator color={colors.ui.accent} size="large" />
+                </View>
+            </SafeAreaView>
+        );
+    }
+
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={commonStyles.screen}>
             {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <Text style={styles.backText}>← Back</Text>
-                </TouchableOpacity>
-                <View style={styles.headerCenter}>
-                    <Text style={styles.headerTitle}>SEASON 1</Text>
-                    <Text style={styles.headerSub}>{season.theme}</Text>
-                </View>
-                <View style={styles.timerBox}>
-                    <Text style={styles.timerText}>{timeRemaining.days}d {timeRemaining.hours}h</Text>
-                </View>
-            </View>
+            <ScreenHeader
+                title="Season 1"
+                rightElement={
+                    <View style={styles.timerBox}>
+                        <Text style={styles.timerText}>{timeRemaining.days}d {timeRemaining.hours}h</Text>
+                    </View>
+                }
+            />
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 {/* Tier Progress */}
@@ -70,18 +100,16 @@ export default function SeasonPassScreen() {
                         <Text style={styles.progressLabel}>TIER {passState.currentTier} / {season.totalTiers}</Text>
                         <Text style={styles.xpLabel}>{passState.currentXP} / {season.xpPerTier} XP</Text>
                     </View>
-                    <View style={styles.progressBarOuter}>
-                        <View style={[styles.progressBarInner, { width: `${Math.max(xpProgress * 100, 2)}%` }]} />
-                    </View>
+                    <ProgressBar current={passState.currentXP} total={season.xpPerTier} height={8} />
                     {!passState.isPremium && (
-                        <TouchableOpacity style={styles.upgradeBtn}>
+                        <TouchableOpacity style={styles.upgradeBtn} accessibilityRole="button">
                             <Text style={styles.upgradeBtnText}>⭐ Unlock Premium Track — 500 💎</Text>
                         </TouchableOpacity>
                     )}
                 </View>
 
                 {/* Reward Track */}
-                <Text style={styles.sectionTitle}>REWARD TRACK</Text>
+                <Text style={commonStyles.sectionTitle}>REWARD TRACK</Text>
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -102,7 +130,7 @@ export default function SeasonPassScreen() {
                 </ScrollView>
 
                 {/* Daily Missions */}
-                <Text style={styles.sectionTitle}>DAILY MISSIONS</Text>
+                <Text style={commonStyles.sectionTitle}>DAILY MISSIONS</Text>
                 {activeDailyMissions.map(mission => (
                     <MissionRow
                         key={mission.id}
@@ -112,7 +140,7 @@ export default function SeasonPassScreen() {
                 ))}
 
                 {/* Weekly Missions */}
-                <Text style={styles.sectionTitle}>WEEKLY MISSIONS</Text>
+                <Text style={commonStyles.sectionTitle}>WEEKLY MISSIONS</Text>
                 {activeWeeklyMissions.map(mission => (
                     <MissionRow
                         key={mission.id}
@@ -122,7 +150,7 @@ export default function SeasonPassScreen() {
                 ))}
 
                 {/* Season Missions */}
-                <Text style={styles.sectionTitle}>SEASON CHALLENGES</Text>
+                <Text style={commonStyles.sectionTitle}>SEASON CHALLENGES</Text>
                 {SEASON_MISSIONS.map(mission => (
                     <MissionRow
                         key={mission.id}

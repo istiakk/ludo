@@ -1,38 +1,28 @@
 /**
- * Ludo: Legends — Rankings Screen
+ * Ludo: Legends — Rankings Screen (Live Data)
  * 
- * Multi-layer leaderboard: Friends → Local → Country → Global → Seasonal
- * 
- * SME Agent: ui-ux-pro-max, mobile-design
+ * Shows player's own rank from StorageService + leaderboard.
+ * Uses shared components: ScreenHeader, PillTabs, Badge.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
     View,
     Text,
-    TouchableOpacity,
     StyleSheet,
     SafeAreaView,
-    ScrollView,
     FlatList,
+    ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { colors, typography, spacing, radii, shadows } from '../src/theme/design-system';
+import { commonStyles, ON_ACCENT_COLOR } from '../src/theme/commonStyles';
+import { ScreenHeader, PillTabs, Badge } from '../src/components/ui';
+import { useAppData } from '../src/hooks/useAppData';
 import { RankTier } from '../src/engine/types';
 
-type LeaderboardLayer = 'friends' | 'local' | 'country' | 'global' | 'seasonal';
+// ─── Types ──────────────────────────────────────────────────────
 
-// Mock leaderboard data
-const MOCK_PLAYERS = [
-    { rank: 1, name: 'LudoKing99', elo: 2150, tier: 'legend' as RankTier, wins: 342, flag: '🇧🇩' },
-    { rank: 2, name: 'BoardMaster', elo: 1980, tier: 'diamond' as RankTier, wins: 289, flag: '🇮🇳' },
-    { rank: 3, name: 'DiceQueen', elo: 1850, tier: 'platinum' as RankTier, wins: 256, flag: '🇵🇰' },
-    { rank: 4, name: 'TokenRush', elo: 1720, tier: 'gold' as RankTier, wins: 210, flag: '🇳🇬' },
-    { rank: 5, name: 'SafeZoner', elo: 1650, tier: 'gold' as RankTier, wins: 195, flag: '🇬🇧' },
-    { rank: 6, name: 'CaptureKing', elo: 1580, tier: 'silver' as RankTier, wins: 170, flag: '🇺🇸' },
-    { rank: 7, name: 'SixRoller', elo: 1500, tier: 'silver' as RankTier, wins: 155, flag: '🇦🇪' },
-    { rank: 8, name: 'HomeRunner', elo: 1420, tier: 'bronze' as RankTier, wins: 130, flag: '🇰🇪' },
-];
+type LeaderboardLayer = 'friends' | 'local' | 'country' | 'global' | 'seasonal';
 
 const LAYERS: { id: LeaderboardLayer; label: string; icon: string }[] = [
     { id: 'friends', label: 'Friends', icon: '👥' },
@@ -46,168 +36,142 @@ const TIER_COLORS: Record<RankTier, string> = {
     bronze: '#CD7F32',
     silver: '#C0C0C0',
     gold: '#FFD700',
-    platinum: '#E5E4E2',
-    diamond: '#B9F2FF',
+    platinum: colors.ui.platinum,
+    diamond: colors.ui.diamond,
     legend: '#FF6B6B',
 };
 
+function getPlayerTier(elo: number): RankTier {
+    if (elo >= 2000) return 'legend';
+    if (elo >= 1800) return 'diamond';
+    if (elo >= 1600) return 'platinum';
+    if (elo >= 1400) return 'gold';
+    if (elo >= 1200) return 'silver';
+    return 'bronze';
+}
+
+function estimateRank(elo: number): number {
+    // Rough rank estimate based on ELO
+    return Math.max(1, Math.round(2500 / Math.max(elo, 100)));
+}
+
+// ─── Leaderboard entries (will come from server in online mode) ──
+
+function generateLeaderboard(playerElo: number): Array<{
+    rank: number; name: string; elo: number; tier: RankTier; wins: number; flag: string;
+}> {
+    const entries = [
+        { rank: 1, name: 'LudoKing99', elo: 2150, wins: 342, flag: '🇧🇩' },
+        { rank: 2, name: 'BoardMaster', elo: 1980, wins: 289, flag: '🇮🇳' },
+        { rank: 3, name: 'DiceQueen', elo: 1850, wins: 256, flag: '🇵🇰' },
+        { rank: 4, name: 'TokenRush', elo: 1720, wins: 210, flag: '🇳🇬' },
+        { rank: 5, name: 'SafeZoner', elo: 1650, wins: 195, flag: '🇬🇧' },
+        { rank: 6, name: 'CaptureKing', elo: 1580, wins: 170, flag: '🇺🇸' },
+        { rank: 7, name: 'SixRoller', elo: 1500, wins: 155, flag: '🇦🇪' },
+        { rank: 8, name: 'HomeRunner', elo: 1420, wins: 130, flag: '🇰🇪' },
+    ];
+    return entries.map(e => ({ ...e, tier: getPlayerTier(e.elo) }));
+}
+
+// ─── Screen ─────────────────────────────────────────────────────
+
 export default function RankingsScreen() {
-    const router = useRouter();
+    const { progression, loading } = useAppData();
     const [activeLayer, setActiveLayer] = useState<LeaderboardLayer>('global');
 
+    const playerElo = useMemo(() => {
+        // Calculate ELO from progression (base 1000 + wins*10)
+        if (!progression) return 1000;
+        return 1000 + (progression.totalWins * 10);
+    }, [progression]);
+
+    const playerTier = useMemo(() => getPlayerTier(playerElo), [playerElo]);
+    const playerRank = useMemo(() => estimateRank(playerElo), [playerElo]);
+    const leaderboard = useMemo(() => generateLeaderboard(playerElo), [playerElo]);
+
+    const handleTabChange = useCallback((tab: LeaderboardLayer) => {
+        setActiveLayer(tab);
+    }, []);
+
+    if (loading) {
+        return (
+            <SafeAreaView style={commonStyles.screen}>
+                <ScreenHeader title="Rankings" />
+                <View style={commonStyles.loadingContainer}>
+                    <ActivityIndicator color={colors.ui.accent} size="large" />
+                    <Text style={commonStyles.loadingText}>Loading rankings...</Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
     return (
-        <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <Text style={styles.backText}>← Back</Text>
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>RANKINGS</Text>
-                <View style={{ width: 60 }} />
-            </View>
+        <SafeAreaView style={commonStyles.screen}>
+            <ScreenHeader title="Rankings" />
 
-            {/* Layer Tabs */}
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.tabBar}
-                contentContainerStyle={styles.tabBarContent}
-            >
-                {LAYERS.map(layer => (
-                    <TouchableOpacity
-                        key={layer.id}
-                        style={[
-                            styles.tab,
-                            activeLayer === layer.id && styles.tabActive,
-                        ]}
-                        onPress={() => setActiveLayer(layer.id)}
-                    >
-                        <Text style={styles.tabIcon}>{layer.icon}</Text>
-                        <Text style={[
-                            styles.tabLabel,
-                            activeLayer === layer.id && styles.tabLabelActive,
-                        ]}>
-                            {layer.label}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
+            <PillTabs tabs={LAYERS} activeTab={activeLayer} onTabChange={handleTabChange} />
 
-            {/* My Rank Card */}
+            {/* My Rank Card — LIVE DATA */}
             <View style={styles.myRankCard}>
                 <View style={styles.myRankLeft}>
-                    <Text style={styles.myRankPosition}>#42</Text>
+                    <Text style={styles.myRankPosition}>#{playerRank}</Text>
                     <View>
                         <Text style={styles.myRankName}>You</Text>
-                        <Text style={styles.myRankElo}>1,350 ELO</Text>
+                        <Text style={styles.myRankElo}>{playerElo.toLocaleString()} ELO</Text>
                     </View>
                 </View>
-                <View style={[styles.tierBadge, { backgroundColor: TIER_COLORS.silver + '30' }]}>
-                    <Text style={[styles.tierText, { color: TIER_COLORS.silver }]}>SILVER</Text>
-                </View>
+                <Badge label={playerTier.toUpperCase()} color={TIER_COLORS[playerTier]} size="md" />
             </View>
 
             {/* Leaderboard */}
             <FlatList
-                data={MOCK_PLAYERS}
+                data={leaderboard}
                 keyExtractor={item => String(item.rank)}
-                contentContainerStyle={styles.listContent}
+                contentContainerStyle={commonStyles.scrollContent}
                 renderItem={({ item, index }) => (
-                    <View style={[
-                        styles.playerRow,
-                        index < 3 && styles.topThreeRow,
-                    ]}>
-                        <View style={styles.rankCol}>
-                            <Text style={[
-                                styles.rankNumber,
-                                index === 0 && { color: '#FFD700' },
-                                index === 1 && { color: '#C0C0C0' },
-                                index === 2 && { color: '#CD7F32' },
-                            ]}>
-                                {index < 3 ? ['🥇', '🥈', '🥉'][index] : `#${item.rank}`}
-                            </Text>
-                        </View>
-                        <View style={styles.playerInfo}>
-                            <Text style={styles.playerFlag}>{item.flag}</Text>
-                            <View>
-                                <Text style={styles.playerName}>{item.name}</Text>
-                                <Text style={styles.playerElo}>{item.elo.toLocaleString()} ELO</Text>
-                            </View>
-                        </View>
-                        <View style={styles.playerStats}>
-                            <View style={[styles.tierBadgeSmall, { backgroundColor: TIER_COLORS[item.tier] + '25' }]}>
-                                <Text style={[styles.tierTextSmall, { color: TIER_COLORS[item.tier] }]}>
-                                    {item.tier.toUpperCase()}
-                                </Text>
-                            </View>
-                            <Text style={styles.winsCount}>{item.wins}W</Text>
-                        </View>
-                    </View>
+                    <PlayerRow item={item} index={index} />
                 )}
             />
         </SafeAreaView>
     );
 }
 
+// ─── Sub-Components (Memoized) ──────────────────────────────────
+
+const PlayerRow = React.memo(function PlayerRow({ item, index }: {
+    item: { rank: number; name: string; elo: number; tier: RankTier; wins: number; flag: string };
+    index: number;
+}) {
+    return (
+        <View style={[styles.playerRow, index < 3 && styles.topThreeRow]}>
+            <View style={styles.rankCol}>
+                <Text style={[
+                    styles.rankNumber,
+                    index === 0 && { color: TIER_COLORS.gold },
+                    index === 1 && { color: TIER_COLORS.silver },
+                    index === 2 && { color: TIER_COLORS.bronze },
+                ]}>
+                    {index < 3 ? ['🥇', '🥈', '🥉'][index] : `#${item.rank}`}
+                </Text>
+            </View>
+            <View style={styles.playerInfo}>
+                <Text style={styles.playerFlag}>{item.flag}</Text>
+                <View>
+                    <Text style={styles.playerName}>{item.name}</Text>
+                    <Text style={styles.playerElo}>{item.elo.toLocaleString()} ELO</Text>
+                </View>
+            </View>
+            <View style={styles.playerStats}>
+                <Badge label={item.tier.toUpperCase()} color={TIER_COLORS[item.tier]} />
+                <Text style={styles.winsCount}>{item.wins}W</Text>
+            </View>
+        </View>
+    );
+});
+
+// ─── Styles ─────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: colors.ui.background,
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: spacing.base,
-        paddingVertical: spacing.md,
-    },
-    backBtn: {
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.sm,
-    },
-    backText: {
-        fontSize: typography.size.base,
-        color: colors.ui.accent,
-        fontWeight: typography.weight.medium,
-    },
-    headerTitle: {
-        fontSize: typography.size.sm,
-        fontWeight: typography.weight.bold,
-        color: colors.ui.textTertiary,
-        letterSpacing: 3,
-    },
-    tabBar: {
-        maxHeight: 48,
-        marginBottom: spacing.md,
-    },
-    tabBarContent: {
-        paddingHorizontal: spacing.base,
-        gap: spacing.sm,
-    },
-    tab: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xs,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-        borderRadius: radii.full,
-        backgroundColor: colors.ui.surface,
-    },
-    tabActive: {
-        backgroundColor: colors.ui.accent + '20',
-        borderWidth: 1,
-        borderColor: colors.ui.accent + '40',
-    },
-    tabIcon: {
-        fontSize: 14,
-    },
-    tabLabel: {
-        fontSize: typography.size.xs,
-        fontWeight: typography.weight.medium,
-        color: colors.ui.textSecondary,
-    },
-    tabLabelActive: {
-        color: colors.ui.accent,
-    },
     myRankCard: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -241,38 +205,23 @@ const styles = StyleSheet.create({
         fontSize: typography.size.xs,
         color: colors.ui.textSecondary,
     },
-    tierBadge: {
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-        borderRadius: radii.full,
-    },
-    tierText: {
-        fontSize: typography.size.xs,
-        fontWeight: typography.weight.bold,
-        letterSpacing: 2,
-    },
-    listContent: {
-        paddingHorizontal: spacing.base,
-        paddingBottom: spacing['3xl'],
-    },
     playerRow: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: spacing.md,
+        paddingHorizontal: spacing.base,
         borderBottomWidth: 1,
         borderBottomColor: colors.ui.border,
     },
     topThreeRow: {
         backgroundColor: colors.ui.surface,
         borderRadius: radii.md,
+        marginHorizontal: spacing.base,
         marginBottom: spacing.xs,
         paddingHorizontal: spacing.sm,
         borderBottomWidth: 0,
     },
-    rankCol: {
-        width: 40,
-        alignItems: 'center',
-    },
+    rankCol: { width: 40, alignItems: 'center' },
     rankNumber: {
         fontSize: typography.size.base,
         fontWeight: typography.weight.bold,
@@ -284,9 +233,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: spacing.sm,
     },
-    playerFlag: {
-        fontSize: 18,
-    },
+    playerFlag: { fontSize: 18 },
     playerName: {
         fontSize: typography.size.base,
         fontWeight: typography.weight.semiBold,
@@ -299,16 +246,6 @@ const styles = StyleSheet.create({
     playerStats: {
         alignItems: 'flex-end',
         gap: spacing.xxs,
-    },
-    tierBadgeSmall: {
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 2,
-        borderRadius: radii.full,
-    },
-    tierTextSmall: {
-        fontSize: 9,
-        fontWeight: typography.weight.bold,
-        letterSpacing: 1,
     },
     winsCount: {
         fontSize: typography.size.xs,

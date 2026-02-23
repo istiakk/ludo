@@ -11,10 +11,12 @@ import React, { useEffect } from 'react';
 import { Circle, Group, Shadow, Paint } from '@shopify/react-native-skia';
 import Animated, {
     useSharedValue,
+    useDerivedValue,
     useAnimatedStyle,
     withTiming,
     withSpring,
     withSequence,
+    withDelay,
     Easing,
 } from 'react-native-reanimated';
 import { Token, PlayerColor } from '../engine/types';
@@ -57,92 +59,127 @@ export function TokenSpriteStatic({
     isSelected,
     isValidTarget,
 }: TokenSpriteProps) {
-    const pos = getTokenPixelPosition(token, cellSize);
+    const targetPos = getTokenPixelPosition(token, cellSize);
     const tokenColors = PLAYER_COLORS[token.color];
     const radius = cellSize * 0.32;
 
+    const x = useSharedValue(targetPos.x);
+    const y = useSharedValue(targetPos.y);
+    const trailX = useSharedValue(targetPos.x);
+    const trailY = useSharedValue(targetPos.y);
+
+    useEffect(() => {
+        // Smooth physics-based grid movement
+        x.value = withSpring(targetPos.x, { damping: 14, stiffness: 120 });
+        y.value = withSpring(targetPos.y, { damping: 14, stiffness: 120 });
+
+        // Trailing echo effect
+        trailX.value = withDelay(50, withSpring(targetPos.x, { damping: 14, stiffness: 120 }));
+        trailY.value = withDelay(50, withSpring(targetPos.y, { damping: 14, stiffness: 120 }));
+    }, [targetPos.x, targetPos.y]);
+
+    const transform = useDerivedValue(() => [
+        { translateX: x.value },
+        { translateY: y.value }
+    ]);
+
+    const trailTransform = useDerivedValue(() => [
+        { translateX: trailX.value },
+        { translateY: trailY.value }
+    ]);
+
     return (
         <Group>
-            {/* Outer glow for selected/valid tokens */}
-            {(isSelected || isValidTarget) && (
-                <Circle
-                    cx={pos.x}
-                    cy={pos.y}
-                    r={radius + 4}
-                    color={isSelected ? tokenColors.light : '#FFFFFF'}
-                    opacity={isSelected ? 0.5 : 0.3}
-                />
-            )}
-
-            {/* Shadow layer */}
-            <Circle
-                cx={pos.x + 1}
-                cy={pos.y + 2}
-                r={radius}
-                color="#000000"
-                opacity={0.3}
-            />
-
-            {/* Base circle */}
-            <Circle
-                cx={pos.x}
-                cy={pos.y}
-                r={radius}
-                color={tokenColors.primary}
-            />
-
-            {/* Inner highlight (premium 3D feel) */}
-            <Circle
-                cx={pos.x - radius * 0.2}
-                cy={pos.y - radius * 0.25}
-                r={radius * 0.5}
-                color={tokenColors.light}
-                opacity={0.4}
-            />
-
-            {/* Top-left specular highlight */}
-            <Circle
-                cx={pos.x - radius * 0.25}
-                cy={pos.y - radius * 0.3}
-                r={radius * 0.15}
-                color="#FFFFFF"
-                opacity={0.6}
-            />
-
-            {/* Inner ring */}
-            <Circle
-                cx={pos.x}
-                cy={pos.y}
-                r={radius * 0.55}
-                color={tokenColors.dark}
-                style="stroke"
-                strokeWidth={1}
-                opacity={0.4}
-            />
-
-            {/* Token number indicator */}
-            <Circle
-                cx={pos.x}
-                cy={pos.y}
-                r={radius * 0.2}
-                color="#FFFFFF"
-                opacity={0.8}
-            />
-
-            {/* Finished indicator */}
-            {token.state === 'finished' && (
-                <Group>
-                    <Circle
-                        cx={pos.x}
-                        cy={pos.y}
-                        r={radius + 2}
-                        color={colors.ui.gold}
-                        style="stroke"
-                        strokeWidth={2}
-                        opacity={0.8}
-                    />
+            {/* Trail Echo */}
+            {token.state === 'active' && (
+                <Group transform={trailTransform} opacity={0.3}>
+                    <Circle cx={0} cy={0} r={radius * 0.8} color={tokenColors.primary} />
                 </Group>
             )}
+
+            <Group transform={transform}>
+                {/* Outer glow for selected/valid tokens */}
+                {(isSelected || isValidTarget) && (
+                    <Circle
+                        cx={0}
+                        cy={0}
+                        r={radius + 4}
+                        color={isSelected ? tokenColors.light : '#FFFFFF'}
+                        opacity={isSelected ? 0.5 : 0.3}
+                    />
+                )}
+
+                {/* 3D Extrusion Body + Cast Shadow */}
+                <Circle
+                    cx={0}
+                    cy={4}
+                    r={radius}
+                    color={tokenColors.dark}
+                >
+                    <Shadow dx={0} dy={6} blur={5} color="#00000080" />
+                </Circle>
+
+                {/* Base circle (Top face of the puck) */}
+                <Circle
+                    cx={0}
+                    cy={0}
+                    r={radius}
+                    color={tokenColors.primary}
+                />
+
+                {/* Inner highlight (premium 3D feel) */}
+                <Circle
+                    cx={-radius * 0.2}
+                    cy={-radius * 0.25}
+                    r={radius * 0.5}
+                    color={tokenColors.light}
+                    opacity={0.4}
+                />
+
+                {/* Top-left specular highlight */}
+                <Circle
+                    cx={-radius * 0.25}
+                    cy={-radius * 0.3}
+                    r={radius * 0.15}
+                    color="#FFFFFF"
+                    opacity={0.6}
+                />
+
+                {/* Inner ring */}
+                <Circle
+                    cx={0}
+                    cy={0}
+                    r={radius * 0.55}
+                    color={tokenColors.dark}
+                    style="stroke"
+                    strokeWidth={1}
+                    opacity={0.4}
+                />
+
+                {/* Token number indicator */}
+                <Circle
+                    cx={0}
+                    cy={0}
+                    r={radius * 0.2}
+                    color="#FFFFFF"
+                    opacity={0.8}
+                />
+
+                {/* Finished indicator */}
+                {token.state === 'finished' && (
+                    <Group>
+                        <Circle
+                            cx={0}
+                            cy={0}
+                            r={radius + 2}
+                            color={colors.ui.gold}
+                            style="stroke"
+                            strokeWidth={2}
+                            opacity={0.8}
+                        />
+                    </Group>
+                )}
+            </Group>
         </Group>
     );
 }

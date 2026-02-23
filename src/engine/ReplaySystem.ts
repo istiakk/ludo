@@ -16,6 +16,7 @@ export interface ReplayFrame {
     move: Move | null; // null = skipped turn
     timestamp: number;
     capturedToken?: string;
+    isClutch?: boolean;
 }
 
 export interface ReplayData {
@@ -34,6 +35,7 @@ export interface ReplayData {
     endedAt: number;
     totalDuration: number;
     totalCaptures: number;
+    clutchFrameIndex: number | null; // Index of the highlight frame
 }
 
 export interface ReplayPlayer {
@@ -65,6 +67,7 @@ export function startRecording(state: GameState): ReplayData {
         endedAt: 0,
         totalDuration: 0,
         totalCaptures: 0,
+        clutchFrameIndex: null,
     };
 }
 
@@ -77,6 +80,9 @@ export function addFrame(
     diceRoll: DiceRoll,
     move: Move | null,
 ): ReplayData {
+    // A move is considered "Clutch" if it's a capture or a finishing move
+    const isClutch = move?.type === 'capture' || move?.type === 'finish';
+
     const frame: ReplayFrame = {
         turnNumber: replay.frames.length + 1,
         playerColor,
@@ -84,12 +90,33 @@ export function addFrame(
         move,
         timestamp: Date.now(),
         capturedToken: move?.capturedToken ?? undefined,
+        isClutch,
     };
+
+    const newFrames = [...replay.frames, frame];
+
+    // Update clutchFrameIndex if this is the most exciting move yet
+    // Prefer captures over finishes, and newer moves over older ones
+    let newClutchIndex = replay.clutchFrameIndex;
+    if (isClutch) {
+        if (newClutchIndex === null) {
+            newClutchIndex = newFrames.length - 1;
+        } else {
+            const existingClutch = newFrames[newClutchIndex];
+            if (move?.type === 'capture' && existingClutch.move?.type !== 'capture') {
+                newClutchIndex = newFrames.length - 1;
+            } else if (move?.type === 'capture') {
+                // Latest capture wins
+                newClutchIndex = newFrames.length - 1;
+            }
+        }
+    }
 
     return {
         ...replay,
-        frames: [...replay.frames, frame],
+        frames: newFrames,
         totalCaptures: replay.totalCaptures + (move?.type === 'capture' ? 1 : 0),
+        clutchFrameIndex: newClutchIndex,
     };
 }
 

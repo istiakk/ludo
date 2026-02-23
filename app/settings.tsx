@@ -1,13 +1,10 @@
 /**
  * Ludo: Legends — Settings Screen
  * 
- * Audio, haptics, accessibility, and account settings.
- * Premium design with toggle switches and sliders.
- * 
- * SME Agent: ui-ux-pro-max, mobile-design
+ * All toggles persist via StorageService. Loads on mount, saves on change.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -16,49 +13,80 @@ import {
     SafeAreaView,
     ScrollView,
     Switch,
+    Alert,
+    ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { colors, typography, spacing, radii, shadows } from '../src/theme/design-system';
-
-interface SettingsState {
-    soundEnabled: boolean;
-    musicEnabled: boolean;
-    hapticsEnabled: boolean;
-    notifications: boolean;
-    showThreatOverlay: boolean;
-    showCoachingHints: boolean;
-    autoRollDice: boolean;
-    animationSpeed: 'normal' | 'fast' | 'instant';
-    boardTheme: string;
-}
+import { colors, typography, spacing, radii } from '../src/theme/design-system';
+import { commonStyles } from '../src/theme/commonStyles';
+import { ScreenHeader } from '../src/components/ui';
+import {
+    getSettings,
+    saveSettings,
+    clearAllData,
+    StoredSettings,
+} from '../src/services/StorageService';
 
 export default function SettingsScreen() {
     const router = useRouter();
-    const [settings, setSettings] = useState<SettingsState>({
-        soundEnabled: true,
-        musicEnabled: true,
-        hapticsEnabled: true,
-        notifications: true,
-        showThreatOverlay: true,
-        showCoachingHints: false,
-        autoRollDice: false,
-        animationSpeed: 'normal',
-        boardTheme: 'classic',
-    });
+    const [settings, setSettings] = useState<StoredSettings | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    const updateSetting = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => {
-        setSettings(prev => ({ ...prev, [key]: value }));
+    useEffect(() => {
+        loadSettings();
+    }, []);
+
+    async function loadSettings() {
+        try {
+            const s = await getSettings();
+            setSettings(s);
+        } catch (error) {
+            console.warn('[Settings] Failed to load:', error);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    const updateSetting = useCallback(async <K extends keyof StoredSettings>(key: K, value: StoredSettings[K]) => {
+        if (!settings) return;
+        const updated = { ...settings, [key]: value };
+        setSettings(updated);
+        await saveSettings(updated);
+    }, [settings]);
+
+    const handleDeleteAccount = () => {
+        Alert.alert(
+            'Delete All Data',
+            'This will erase your profile, match history, cosmetics, and all progress. This cannot be undone.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete Everything',
+                    style: 'destructive',
+                    onPress: async () => {
+                        await clearAllData();
+                        Alert.alert('Done', 'All data has been cleared. The app will reset.', [
+                            { text: 'OK', onPress: () => router.replace('/') },
+                        ]);
+                    },
+                },
+            ],
+        );
     };
 
+    if (loading || !settings) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.ui.accent} />
+                </View>
+            </SafeAreaView>
+        );
+    }
+
     return (
-        <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <Text style={styles.backText}>← Back</Text>
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>SETTINGS</Text>
-                <View style={{ width: 60 }} />
-            </View>
+        <SafeAreaView style={commonStyles.screen}>
+            <ScreenHeader title="Settings" />
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 {/* Audio */}
@@ -107,7 +135,7 @@ export default function SettingsScreen() {
                         label="Animation Speed"
                         options={['normal', 'fast', 'instant']}
                         selected={settings.animationSpeed}
-                        onSelect={v => updateSetting('animationSpeed', v as SettingsState['animationSpeed'])}
+                        onSelect={v => updateSetting('animationSpeed', v as StoredSettings['animationSpeed'])}
                     />
                 </SettingsSection>
 
@@ -135,8 +163,11 @@ export default function SettingsScreen() {
                         <Text style={styles.actionText}>Terms of Service</Text>
                         <Text style={styles.actionArrow}>→</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionButton, styles.dangerButton]}>
-                        <Text style={styles.dangerText}>Delete Account</Text>
+                    <TouchableOpacity
+                        style={[styles.actionButton, styles.dangerButton]}
+                        onPress={handleDeleteAccount}
+                    >
+                        <Text style={styles.dangerText}>Delete All Data</Text>
                     </TouchableOpacity>
                 </SettingsSection>
 
@@ -210,143 +241,43 @@ function SettingsOption({
 // ─── Styles ─────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: colors.ui.background,
-    },
+    container: { flex: 1, backgroundColor: colors.ui.background },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: spacing.base,
-        paddingVertical: spacing.md,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: spacing.base, paddingVertical: spacing.md,
     },
-    backBtn: {
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.sm,
-    },
-    backText: {
-        fontSize: typography.size.base,
-        color: colors.ui.accent,
-        fontWeight: typography.weight.medium,
-    },
-    headerTitle: {
-        fontSize: typography.size.sm,
-        fontWeight: typography.weight.bold,
-        color: colors.ui.textTertiary,
-        letterSpacing: 3,
-    },
-    scrollContent: {
-        paddingBottom: spacing['3xl'],
-    },
-    section: {
-        paddingHorizontal: spacing.base,
-        marginBottom: spacing.xl,
-    },
-    sectionTitle: {
-        fontSize: typography.size.xs,
-        fontWeight: typography.weight.bold,
-        color: colors.ui.textTertiary,
-        letterSpacing: 2,
-        marginBottom: spacing.md,
-    },
-    sectionContent: {
-        backgroundColor: colors.ui.surface,
-        borderRadius: radii.lg,
-        overflow: 'hidden',
-    },
+    backBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
+    backText: { fontSize: typography.size.base, color: colors.ui.accent, fontWeight: typography.weight.medium },
+    headerTitle: { fontSize: typography.size.sm, fontWeight: typography.weight.bold, color: colors.ui.textTertiary, letterSpacing: 3 },
+    scrollContent: { paddingBottom: spacing['3xl'] },
+    section: { paddingHorizontal: spacing.base, marginBottom: spacing.xl },
+    sectionTitle: { fontSize: typography.size.xs, fontWeight: typography.weight.bold, color: colors.ui.textTertiary, letterSpacing: 2, marginBottom: spacing.md },
+    sectionContent: { backgroundColor: colors.ui.surface, borderRadius: radii.lg, overflow: 'hidden' },
     toggleRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: spacing.md,
-        paddingHorizontal: spacing.lg,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.ui.border,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingVertical: spacing.md, paddingHorizontal: spacing.lg,
+        borderBottomWidth: 1, borderBottomColor: colors.ui.border,
     },
-    toggleInfo: {
-        flex: 1,
-        marginRight: spacing.md,
-    },
-    toggleLabel: {
-        fontSize: typography.size.base,
-        fontWeight: typography.weight.medium,
-        color: colors.ui.text,
-    },
-    toggleDesc: {
-        fontSize: typography.size.xs,
-        color: colors.ui.textTertiary,
-        marginTop: spacing.xxs,
-    },
-    optionRow: {
-        paddingVertical: spacing.md,
-        paddingHorizontal: spacing.lg,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.ui.border,
-    },
-    optionButtons: {
-        flexDirection: 'row',
-        gap: spacing.sm,
-        marginTop: spacing.sm,
-    },
-    optionBtn: {
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.md,
-        borderRadius: radii.full,
-        backgroundColor: colors.ui.surfaceElevated,
-    },
-    optionBtnActive: {
-        backgroundColor: colors.ui.accent + '30',
-        borderWidth: 1,
-        borderColor: colors.ui.accent,
-    },
-    optionText: {
-        fontSize: typography.size.xs,
-        fontWeight: typography.weight.medium,
-        color: colors.ui.textSecondary,
-    },
-    optionTextActive: {
-        color: colors.ui.accent,
-    },
+    toggleInfo: { flex: 1, marginRight: spacing.md },
+    toggleLabel: { fontSize: typography.size.base, fontWeight: typography.weight.medium, color: colors.ui.text },
+    toggleDesc: { fontSize: typography.size.xs, color: colors.ui.textTertiary, marginTop: spacing.xxs },
+    optionRow: { paddingVertical: spacing.md, paddingHorizontal: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.ui.border },
+    optionButtons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+    optionBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.md, borderRadius: radii.full, backgroundColor: colors.ui.surfaceElevated },
+    optionBtnActive: { backgroundColor: colors.ui.accent + '30', borderWidth: 1, borderColor: colors.ui.accent },
+    optionText: { fontSize: typography.size.xs, fontWeight: typography.weight.medium, color: colors.ui.textSecondary },
+    optionTextActive: { color: colors.ui.accent },
     actionButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: spacing.md,
-        paddingHorizontal: spacing.lg,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.ui.border,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingVertical: spacing.md, paddingHorizontal: spacing.lg,
+        borderBottomWidth: 1, borderBottomColor: colors.ui.border,
     },
-    actionText: {
-        fontSize: typography.size.base,
-        fontWeight: typography.weight.medium,
-        color: colors.ui.text,
-    },
-    actionArrow: {
-        fontSize: typography.size.md,
-        color: colors.ui.textTertiary,
-    },
-    dangerButton: {
-        borderBottomWidth: 0,
-    },
-    dangerText: {
-        fontSize: typography.size.base,
-        fontWeight: typography.weight.medium,
-        color: colors.ui.error,
-    },
-    versionInfo: {
-        alignItems: 'center',
-        paddingVertical: spacing.xl,
-    },
-    versionText: {
-        fontSize: typography.size.sm,
-        color: colors.ui.textTertiary,
-        fontWeight: typography.weight.medium,
-    },
-    versionSub: {
-        fontSize: typography.size.xs,
-        color: colors.ui.textTertiary,
-        marginTop: spacing.xxs,
-        opacity: 0.6,
-    },
+    actionText: { fontSize: typography.size.base, fontWeight: typography.weight.medium, color: colors.ui.text },
+    actionArrow: { fontSize: typography.size.md, color: colors.ui.textTertiary },
+    dangerButton: { borderBottomWidth: 0 },
+    dangerText: { fontSize: typography.size.base, fontWeight: typography.weight.medium, color: colors.ui.error },
+    versionInfo: { alignItems: 'center', paddingVertical: spacing.xl },
+    versionText: { fontSize: typography.size.sm, color: colors.ui.textTertiary, fontWeight: typography.weight.medium },
+    versionSub: { fontSize: typography.size.xs, color: colors.ui.textTertiary, marginTop: spacing.xxs, opacity: 0.6 },
 });

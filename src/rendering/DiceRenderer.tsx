@@ -42,21 +42,50 @@ export default function DiceRenderer({
     const rotation = useSharedValue(0);
     const scale = useSharedValue(1);
     const opacity = useSharedValue(1);
+    const translateX = useSharedValue(0);
+    const translateY = useSharedValue(0);
+
+    const playBounceHaptic = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    };
 
     useEffect(() => {
         if (currentRoll) {
-            // Rolling animation sequence
+            // Realistic throw trajectory (Y-axis bounce)
+            translateY.value = withSequence(
+                withTiming(-120, { duration: 150, easing: Easing.out(Easing.quad) }), // Throw up
+                withTiming(0, { duration: 150, easing: Easing.in(Easing.quad) }, (finished) => { if (finished) runOnJS(playBounceHaptic)(); }), // Hit 1
+                withTiming(-60, { duration: 120, easing: Easing.out(Easing.quad) }), // Bounce up
+                withTiming(0, { duration: 120, easing: Easing.in(Easing.quad) }, (finished) => { if (finished) runOnJS(playBounceHaptic)(); }), // Hit 2
+                withTiming(-20, { duration: 80, easing: Easing.out(Easing.quad) }),  // Micro bounce
+                withTiming(0, { duration: 80, easing: Easing.in(Easing.quad) }, (finished) => { if (finished) runOnJS(playBounceHaptic)(); })   // Hit 3
+            );
+
+            // Scale (parallax to match height)
             scale.value = withSequence(
-                withTiming(0.8, { duration: 80 }),
-                withSpring(1.15, { damping: 8, stiffness: 300 }),
-                withSpring(1, { damping: 12, stiffness: 200 }),
+                withTiming(1.4, { duration: 150 }),
+                withTiming(1.0, { duration: 150 }),
+                withTiming(1.15, { duration: 120 }),
+                withTiming(1.0, { duration: 120 }),
+                withTiming(1.05, { duration: 80 }),
+                withTiming(1.0, { duration: 80 })
             );
+
+            // X-axis random wandering to make rolls feel chaotic
+            const randomX = (Math.random() - 0.5) * 80;
+            translateX.value = withSequence(
+                withTiming(randomX, { duration: 300, easing: Easing.out(Easing.quad) }),
+                withTiming(0, { duration: 340, easing: Easing.inOut(Easing.quad) })
+            );
+
+            // Rotation (tumble)
             rotation.value = withSequence(
-                withTiming(360 * 3, { duration: animation.duration.dice, easing: Easing.out(Easing.cubic) }),
-                withTiming(0, { duration: 0 }),
+                withTiming(360 * 3 + (Math.random() * 90), { duration: 640, easing: Easing.out(Easing.cubic) }),
+                withTiming(0, { duration: 0 })
             );
+
             opacity.value = withSequence(
-                withTiming(0.6, { duration: 100 }),
+                withTiming(0.8, { duration: 100 }),
                 withTiming(1, { duration: 300 }),
             );
         }
@@ -64,6 +93,8 @@ export default function DiceRenderer({
 
     const diceAnimatedStyle = useAnimatedStyle(() => ({
         transform: [
+            { translateX: translateX.value },
+            { translateY: translateY.value },
             { scale: scale.value },
             { rotateZ: `${rotation.value}deg` },
         ],

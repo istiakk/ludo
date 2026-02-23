@@ -1,12 +1,10 @@
 /**
  * Ludo: Legends — Cosmetics Shop Screen
  * 
- * Premium shop with categories, rarity filters, and unlock progress.
- * 
- * SME Agent: ui-ux-pro-max, mobile-design, game-development/game-design
+ * Live wallet, real buy flow with EconomyEngine, owned/equipped tracking.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -15,15 +13,32 @@ import {
     SafeAreaView,
     ScrollView,
     FlatList,
+    Alert,
+    ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { colors, typography, spacing, radii, shadows } from '../src/theme/design-system';
+import { commonStyles, ON_ACCENT_COLOR } from '../src/theme/commonStyles';
+import { ScreenHeader, CurrencyDisplay } from '../src/components/ui';
 import {
     COSMETICS_CATALOG,
     Cosmetic,
     CosmeticCategory,
     CosmeticRarity,
 } from '../src/services/ProgressionService';
+import {
+    getWallet,
+    saveWallet,
+    getOwnedCosmetics,
+    saveOwnedCosmetics,
+    getEquippedCosmetics,
+    saveEquippedCosmetics,
+    getProgression,
+    StoredWallet,
+    StoredProgression,
+} from '../src/services/StorageService';
+import { canAfford, processTransaction } from '../src/services/EconomyEngine';
 
 type FilterCategory = CosmeticCategory | 'all';
 
@@ -46,25 +61,128 @@ const RARITY_COLORS: Record<CosmeticRarity, string> = {
 export default function ShopScreen() {
     const router = useRouter();
     const [activeCategory, setActiveCategory] = useState<FilterCategory>('all');
+    const [loading, setLoading] = useState(true);
+
+    // Live data
+    const [wallet, setWallet] = useState<StoredWallet>({ coins: 0, gems: 0 });
+    const [owned, setOwned] = useState<string[]>([]);
+    const [equipped, setEquipped] = useState<Record<string, string | null>>({});
+    const [progression, setProgression] = useState<StoredProgression | null>(null);
+
+    useEffect(() => {
+        loadData();
+    }, []);
+
+    async function loadData() {
+        try {
+            const [w, o, e, p] = await Promise.all([
+                getWallet(),
+                getOwnedCosmetics(),
+                getEquippedCosmetics(),
+                getProgression(),
+            ]);
+            setWallet(w);
+            setOwned(o);
+            setEquipped(e);
+            setProgression(p);
+        } catch (error) {
+            console.warn('[Shop] Failed to load data:', error);
+        } finally {
+            setLoading(false);
+        }
+    }
 
     const filteredItems = useMemo(() => {
         if (activeCategory === 'all') return COSMETICS_CATALOG;
         return COSMETICS_CATALOG.filter(item => item.category === activeCategory);
     }, [activeCategory]);
 
-    return (
-        <SafeAreaView style={styles.container}>
-            {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <Text style={styles.backText}>← Back</Text>
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>SHOP</Text>
-                <View style={styles.currencyDisplay}>
-                    <Text style={styles.currencyText}>🪙 1,250</Text>
-                    <Text style={styles.currencyText}>💎 15</Text>
+    const handlePurchase = useCallback(async (item: Cosmetic) => {
+        if (owned.includes(item.id)) {
+            // Already owned → toggle equip
+            const newEquipped = { ...equipped };
+            if (equipped[item.category] === item.id) {
+                newEquipped[item.category] = null; // Unequip
+            } else {
+                newEquipped[item.category] = item.id; // Equip
+            }
+            setEquipped(newEquipped);
+            await saveEquippedCosmetics(newEquipped);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            return;
+        }
+
+        // Check affordability
+        if (!canAfford(wallet, item.price.currency, item.price.amount)) {
+            Alert.alert(
+                'Not enough ' + (item.price.currency === 'coins' ? 'coins' : 'gems'),
+                `You need ${item.price.amount} ${item.price.currency} but have ${wallet[item.price.currency]}.`,
+            );
+            return;
+        }
+
+        // Process purchase
+        Alert.alert(
+            'Buy ' + item.name + '?',
+            `${item.price.currency === 'coins' ? '🪙' : '💎'} ${item.price.amount} ${item.price.currency}`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Buy',
+                    onPress: async () => {
+                        const result = processTransaction(
+                            wallet,
+                            'purchase_cosmetic',
+                            item.price.currency,
+                            -item.price.amount,
+                            `Purchased ${item.name}`,
+                        );
+
+                        if ('error' in result) {
+                            Alert.alert('Error', result.error);
+                            return;
+                        }
+
+                        // Save updated wallet
+                        setWallet(result.wallet);
+                        await saveWallet(result.wallet);
+
+                        // Save owned cosmetics
+                        const newOwned = [...owned, item.id];
+                        setOwned(newOwned);
+                        await saveOwnedCosmetics(newOwned);
+
+                        // Auto-equip if nothing equipped in that category
+                        if (!equipped[item.category]) {
+                            const newEquipped = { ...equipped, [item.category]: item.id };
+                            setEquipped(newEquipped);
+                            await saveEquippedCosmetics(newEquipped);
+                        }
+
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    },
+                },
+            ],
+        );
+    }, [wallet, owned, equipped]);
+
+    if (loading) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.ui.accent} />
                 </View>
-            </View>
+            </SafeAreaView>
+        );
+    }
+
+    return (
+        <SafeAreaView style={commonStyles.screen}>
+            {/* Header */}
+            <ScreenHeader
+                title="Shop"
+                rightElement={<CurrencyDisplay coins={wallet.coins} gems={wallet.gems} />}
+            />
 
             {/* Category Tabs */}
             <ScrollView
@@ -96,38 +214,72 @@ export default function ShopScreen() {
                 numColumns={2}
                 contentContainerStyle={styles.gridContent}
                 columnWrapperStyle={styles.gridRow}
-                renderItem={({ item }) => <ShopItem item={item} />}
+                renderItem={({ item }) => (
+                    <ShopItem
+                        item={item}
+                        isOwned={owned.includes(item.id)}
+                        isEquipped={equipped[item.category] === item.id}
+                        canBuy={canAfford(wallet, item.price.currency, item.price.amount)}
+                        onPress={() => handlePurchase(item)}
+                    />
+                )}
             />
         </SafeAreaView>
     );
 }
 
-function ShopItem({ item }: { item: Cosmetic }) {
+function ShopItem({ item, isOwned, isEquipped, canBuy, onPress }: {
+    item: Cosmetic; isOwned: boolean; isEquipped: boolean; canBuy: boolean; onPress: () => void;
+}) {
     const rarityColor = RARITY_COLORS[item.rarity];
 
     return (
-        <TouchableOpacity style={[styles.shopCard, { borderColor: rarityColor + '30' }]} activeOpacity={0.7}>
-            {/* Rarity badge */}
-            <View style={[styles.rarityBadge, { backgroundColor: rarityColor + '20' }]}>
-                <Text style={[styles.rarityText, { color: rarityColor }]}>
-                    {item.rarity.toUpperCase()}
-                </Text>
-            </View>
+        <TouchableOpacity
+            style={[
+                styles.shopCard,
+                { borderColor: isOwned ? colors.ui.accent + '40' : rarityColor + '30' },
+                isEquipped && { backgroundColor: colors.ui.accent + '08' },
+            ]}
+            onPress={onPress}
+            activeOpacity={0.7}
+        >
+            {/* Status badge */}
+            {isEquipped ? (
+                <View style={[styles.rarityBadge, { backgroundColor: colors.ui.accent + '20' }]}>
+                    <Text style={[styles.rarityText, { color: colors.ui.accent }]}>EQUIPPED</Text>
+                </View>
+            ) : isOwned ? (
+                <View style={[styles.rarityBadge, { backgroundColor: colors.ui.success + '20' }]}>
+                    <Text style={[styles.rarityText, { color: colors.ui.success }]}>OWNED</Text>
+                </View>
+            ) : (
+                <View style={[styles.rarityBadge, { backgroundColor: rarityColor + '20' }]}>
+                    <Text style={[styles.rarityText, { color: rarityColor }]}>
+                        {item.rarity.toUpperCase()}
+                    </Text>
+                </View>
+            )}
 
             {/* Icon */}
             <Text style={styles.itemIcon}>{item.icon}</Text>
             <Text style={styles.itemName}>{item.name}</Text>
             <Text style={styles.itemDesc} numberOfLines={2}>{item.description}</Text>
 
-            {/* Price */}
+            {/* Price / Action */}
             <View style={styles.priceRow}>
-                <Text style={styles.priceText}>
-                    {item.price.currency === 'coins' ? '🪙' : '💎'} {item.price.amount}
-                </Text>
+                {isOwned ? (
+                    <Text style={[styles.priceText, { color: colors.ui.accent }]}>
+                        {isEquipped ? '✓ Active' : 'Tap to equip'}
+                    </Text>
+                ) : (
+                    <Text style={[styles.priceText, !canBuy && { opacity: 0.4 }]}>
+                        {item.price.currency === 'coins' ? '🪙' : '💎'} {item.price.amount}
+                    </Text>
+                )}
             </View>
 
             {/* Unlock requirement */}
-            {item.unlockRequirement && (
+            {!isOwned && item.unlockRequirement && (
                 <View style={styles.unlockReq}>
                     <Text style={styles.unlockText}>
                         🔒 {formatUnlockRequirement(item.unlockRequirement)}
@@ -149,134 +301,44 @@ function formatUnlockRequirement(req: NonNullable<Cosmetic['unlockRequirement']>
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: colors.ui.background,
-    },
+    container: { flex: 1, backgroundColor: colors.ui.background },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: spacing.base,
-        paddingVertical: spacing.md,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: spacing.base, paddingVertical: spacing.md,
     },
-    backBtn: {
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.sm,
-    },
-    backText: {
-        fontSize: typography.size.base,
-        color: colors.ui.accent,
-        fontWeight: typography.weight.medium,
-    },
-    headerTitle: {
-        fontSize: typography.size.sm,
-        fontWeight: typography.weight.bold,
-        color: colors.ui.textTertiary,
-        letterSpacing: 3,
-    },
-    currencyDisplay: {
-        flexDirection: 'row',
-        gap: spacing.md,
-    },
-    currencyText: {
-        fontSize: typography.size.xs,
-        fontWeight: typography.weight.bold,
-        color: colors.ui.text,
-    },
-    tabBar: {
-        maxHeight: 48,
-        marginBottom: spacing.md,
-    },
-    tabBarContent: {
-        paddingHorizontal: spacing.base,
-        gap: spacing.sm,
-    },
+    backBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
+    backText: { fontSize: typography.size.base, color: colors.ui.accent, fontWeight: typography.weight.medium },
+    headerTitle: { fontSize: typography.size.sm, fontWeight: typography.weight.bold, color: colors.ui.textTertiary, letterSpacing: 3 },
+    currencyDisplay: { flexDirection: 'row', gap: spacing.md },
+    currencyText: { fontSize: typography.size.xs, fontWeight: typography.weight.bold, color: colors.ui.text },
+    tabBar: { maxHeight: 48, marginBottom: spacing.md },
+    tabBarContent: { paddingHorizontal: spacing.base, gap: spacing.sm },
     tab: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xs,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-        borderRadius: radii.full,
-        backgroundColor: colors.ui.surface,
+        flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+        paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+        borderRadius: radii.full, backgroundColor: colors.ui.surface,
     },
-    tabActive: {
-        backgroundColor: colors.ui.accent + '20',
-        borderWidth: 1,
-        borderColor: colors.ui.accent + '40',
-    },
-    tabIcon: {
-        fontSize: 14,
-    },
-    tabLabel: {
-        fontSize: typography.size.xs,
-        fontWeight: typography.weight.medium,
-        color: colors.ui.textSecondary,
-    },
-    tabLabelActive: {
-        color: colors.ui.accent,
-    },
-    gridContent: {
-        paddingHorizontal: spacing.base,
-        paddingBottom: spacing['3xl'],
-    },
-    gridRow: {
-        gap: spacing.md,
-        marginBottom: spacing.md,
-    },
+    tabActive: { backgroundColor: colors.ui.accent + '20', borderWidth: 1, borderColor: colors.ui.accent + '40' },
+    tabIcon: { fontSize: 14 },
+    tabLabel: { fontSize: typography.size.xs, fontWeight: typography.weight.medium, color: colors.ui.textSecondary },
+    tabLabelActive: { color: colors.ui.accent },
+    gridContent: { paddingHorizontal: spacing.base, paddingBottom: spacing['3xl'] },
+    gridRow: { gap: spacing.md, marginBottom: spacing.md },
     shopCard: {
-        flex: 1,
-        backgroundColor: colors.ui.surface,
-        borderRadius: radii.lg,
-        padding: spacing.md,
-        borderWidth: 1,
-        ...shadows.sm,
+        flex: 1, backgroundColor: colors.ui.surface, borderRadius: radii.lg,
+        padding: spacing.md, borderWidth: 1, ...shadows.sm,
     },
     rarityBadge: {
-        alignSelf: 'flex-start',
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 2,
-        borderRadius: radii.full,
-        marginBottom: spacing.sm,
+        alignSelf: 'flex-start', paddingHorizontal: spacing.sm,
+        paddingVertical: 2, borderRadius: radii.full, marginBottom: spacing.sm,
     },
-    rarityText: {
-        fontSize: 9,
-        fontWeight: typography.weight.bold,
-        letterSpacing: 1,
-    },
-    itemIcon: {
-        fontSize: 32,
-        marginBottom: spacing.sm,
-    },
-    itemName: {
-        fontSize: typography.size.base,
-        fontWeight: typography.weight.bold,
-        color: colors.ui.text,
-        marginBottom: spacing.xxs,
-    },
-    itemDesc: {
-        fontSize: typography.size.xs,
-        color: colors.ui.textSecondary,
-        lineHeight: typography.size.xs * 1.4,
-        marginBottom: spacing.sm,
-    },
-    priceRow: {
-        marginTop: 'auto' as const,
-    },
-    priceText: {
-        fontSize: typography.size.sm,
-        fontWeight: typography.weight.bold,
-        color: colors.ui.text,
-    },
-    unlockReq: {
-        marginTop: spacing.xs,
-        paddingTop: spacing.xs,
-        borderTopWidth: 1,
-        borderTopColor: colors.ui.border,
-    },
-    unlockText: {
-        fontSize: 10,
-        color: colors.ui.textTertiary,
-    },
+    rarityText: { fontSize: 9, fontWeight: typography.weight.bold, letterSpacing: 1 },
+    itemIcon: { fontSize: 32, marginBottom: spacing.sm },
+    itemName: { fontSize: typography.size.base, fontWeight: typography.weight.bold, color: colors.ui.text, marginBottom: spacing.xxs },
+    itemDesc: { fontSize: typography.size.xs, color: colors.ui.textSecondary, lineHeight: typography.size.xs * 1.4, marginBottom: spacing.sm },
+    priceRow: { marginTop: 'auto' as const },
+    priceText: { fontSize: typography.size.sm, fontWeight: typography.weight.bold, color: colors.ui.text },
+    unlockReq: { marginTop: spacing.xs, paddingTop: spacing.xs, borderTopWidth: 1, borderTopColor: colors.ui.border },
+    unlockText: { fontSize: 10, color: colors.ui.textTertiary },
 });

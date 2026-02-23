@@ -1,13 +1,16 @@
 /**
- * Ludo: Legends — Game Screen
- * 
- * Active match view with Skia board, animated dice, and HUD.
- * Full integration of engine + store + rendering layers.
- * 
- * SME Agent: game-development, react-native-architecture, mobile-design
+ * Ludo: Legends — Game Screen (Ultimate Edition)
+ *
+ * Active match view integrating 6 pillars of premium game experience:
+ * 1. Game Effects Engine (combos, screen shake, momentum)
+ * 2. Emote System (8 emotes with floating bubbles)
+ * 3. Board Theme Engine (12 swappable themes)
+ * 4. Cinematic Victory Screen (4-phase animation)
+ * 5. Match Commentary (AI play-by-play)
+ * 6. Dynamic HUD (animated chips, dice history, momentum)
  */
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState, useRef, useMemo } from 'react';
 import {
     View,
     Text,
@@ -20,22 +23,45 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useGameStore } from '../src/store/gameStore';
 import {
-    GameMode,
-    MatchType,
-    Move,
+    type GameMode,
+    type MatchType,
+    type Move,
     getCurrentPlayer,
     getPlayerTokens,
 } from '../src/engine';
 import GameBoard from '../src/rendering/GameBoard';
 import DiceRenderer from '../src/rendering/DiceRenderer';
+import ScreenEffects from '../src/rendering/ScreenEffects';
+import CommentaryBanner from '../src/components/CommentaryBanner';
+import EmoteWheel from '../src/components/EmoteWheel';
+import VictoryScreen from '../src/components/VictoryScreen';
+import GameHUD from '../src/components/GameHUD';
+import {
+    type GameEffect,
+    type MatchStats,
+    createMatchStats,
+    processCaptureEvent,
+    processDiceRoll,
+    processNonCaptureMove,
+    processTokenFinish,
+} from '../src/rendering/GameEffectsEngine';
+import {
+    type CommentaryLine,
+    onCapture,
+    onLuckyRoll,
+    onCombo,
+    onTokenFinish,
+} from '../src/engine/MatchCommentary';
+import { serializeReplay } from '../src/engine/ReplaySystem';
 import { colors, typography, spacing, radii, shadows, layout, getPlayerColor } from '../src/theme/design-system';
 
 export default function GameScreen() {
     const router = useRouter();
-    const params = useLocalSearchParams<{ mode: string; matchType: string }>();
+    const params = useLocalSearchParams<{ mode: string; matchType: string; difficulty: string }>();
 
     const {
         gameState,
+        replayData,
         isAnimating,
         selectedTokenId,
         startGame,
@@ -46,11 +72,21 @@ export default function GameScreen() {
         resetGame,
     } = useGameStore();
 
+    // ─── Effects Engine State ───────────
+    const [matchStats, setMatchStats] = useState<MatchStats>(() =>
+        createMatchStats(['red', 'green', 'yellow', 'blue'], 4),
+    );
+    const [activeEffects, setActiveEffects] = useState<GameEffect[]>([]);
+    const [commentary, setCommentary] = useState<CommentaryLine | null>(null);
+    const [diceHistory, setDiceHistory] = useState<number[]>([]);
+    const prevPhaseRef = useRef<string | null>(null);
+
     // Initialize game on mount
     useEffect(() => {
         const mode = (params.mode as GameMode) || 'classic';
         const matchType = (params.matchType as MatchType) || 'vs_ai';
-        startGame(mode, matchType);
+        const difficulty = (params.difficulty || 'intermediate') as import('../src/engine/types').AIDifficulty;
+        startGame(mode, matchType, 'You', difficulty);
         return () => resetGame();
     }, []);
 
@@ -64,6 +100,40 @@ export default function GameScreen() {
         }
     }, [gameState?.currentPlayerIndex]);
 
+    // ─── Track dice rolls for effects ───
+    useEffect(() => {
+        if (!gameState?.currentDice) return;
+        const roll = gameState.currentDice;
+        setDiceHistory(prev => [...prev, roll.value]);
+
+        // Process dice roll effects
+        const currentPlayer = getCurrentPlayer(gameState);
+        const { stats: updatedStats, effects } = processDiceRoll(
+            matchStats, currentPlayer.color, roll.value,
+        );
+        setMatchStats(updatedStats);
+
+        if (effects.length > 0) {
+            setActiveEffects(prev => [...prev, ...effects]);
+            // Lucky roll commentary
+            const luckyEffect = effects.find(e => e.type === 'lucky_roll');
+            if (luckyEffect && luckyEffect.type === 'lucky_roll') {
+                setCommentary(onLuckyRoll(currentPlayer.name, luckyEffect.value));
+            }
+        }
+    }, [gameState?.currentDice]);
+
+    // ─── Clear effects after consumed ───
+    const handleEffectsConsumed = useCallback(() => {
+        setActiveEffects([]);
+    }, []);
+
+    // ─── EmoteHandler ──────────────────
+    const handleEmote = useCallback((emoteId: string) => {
+        // In multiplayer: broadcast to other players
+        console.log(`[Emote] Sent: ${emoteId}`);
+    }, []);
+
     const handleDiceRoll = useCallback(() => {
         if (!gameState || gameState.phase !== 'rolling' || isAnimating) return;
         const currentPlayer = getCurrentPlayer(gameState);
@@ -72,21 +142,52 @@ export default function GameScreen() {
     }, [gameState, isAnimating, rollDice]);
 
     const handleMoveSelect = useCallback(async (move: Move) => {
-        if (isAnimating) return;
+        if (isAnimating || !gameState) return;
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+        // Process effects based on move type
+        const currentPlayer = getCurrentPlayer(gameState);
+        if (move.type === 'capture') {
+            const { stats: updatedStats, effects } = processCaptureEvent(
+                matchStats, currentPlayer.color, move.capturedToken ?? 'unknown',
+            );
+            setMatchStats(updatedStats);
+            setActiveEffects(prev => [...prev, ...effects]);
+
+            // Commentary
+            const capturedPlayer = gameState.players.find(p =>
+                p.color !== currentPlayer.color,
+            );
+            setCommentary(onCapture(currentPlayer.name, capturedPlayer?.name ?? 'Opponent'));
+
+            // Combo commentary
+            if (updatedStats.comboCount >= 2) {
+                setTimeout(() => {
+                    setCommentary(onCombo(currentPlayer.name, updatedStats.comboCount));
+                }, 1500);
+            }
+        } else if (move.type === 'finish') {
+            const { stats: updatedStats, effects } = processTokenFinish(matchStats, currentPlayer.color);
+            setMatchStats(updatedStats);
+            if (effects.length > 0) setActiveEffects(prev => [...prev, ...effects]);
+
+            const tokens = getPlayerTokens(gameState, currentPlayer.color);
+            const remaining = tokens.filter(t => t.state !== 'finished').length - 1;
+            setCommentary(onTokenFinish(currentPlayer.name, remaining));
+        } else {
+            setMatchStats(processNonCaptureMove(matchStats));
+        }
+
         selectMove(move);
-    }, [isAnimating, selectMove]);
+    }, [isAnimating, selectMove, gameState, matchStats]);
 
     const handleTokenPress = useCallback((tokenId: string) => {
         if (!gameState || gameState.phase !== 'moving') return;
-        const currentPlayer = getCurrentPlayer(gameState);
 
-        // Find moves for this token
         const movesForToken = gameState.validMoves.filter(m => m.tokenId === tokenId);
         if (movesForToken.length === 0) return;
 
         if (movesForToken.length === 1) {
-            // Auto-execute if only one move
             handleMoveSelect(movesForToken[0]);
         } else {
             selectToken(tokenId);
@@ -99,6 +200,25 @@ export default function GameScreen() {
             { text: 'Leave', style: 'destructive', onPress: () => { resetGame(); router.back(); } },
         ]);
     };
+
+    // ─── Derived Data ───────────────────
+    const hudPlayers = useMemo(() => {
+        if (!gameState) return [];
+        const currentColor = getCurrentPlayer(gameState).color;
+        return gameState.players.map(player => {
+            const tokens = getPlayerTokens(gameState, player.color);
+            const pColors = getPlayerColor(player.color);
+            return {
+                name: player.name,
+                color: player.color,
+                colorPrimary: pColors.primary,
+                isAI: player.isAI,
+                isActive: player.color === currentColor,
+                tokensFinished: tokens.filter(t => t.state === 'finished').length,
+                totalTokens: tokens.length,
+            };
+        });
+    }, [gameState]);
 
     if (!gameState) {
         return (
@@ -113,10 +233,13 @@ export default function GameScreen() {
     const currentPlayer = getCurrentPlayer(gameState);
     const playerColors = getPlayerColor(currentPlayer.color);
     const isMyTurn = !currentPlayer.isAI;
+    const isGameOver = gameState.phase === 'finished';
+    const isWinner = gameState.winner === gameState.players[0].color;
+    const winnerPlayer = gameState.players.find(p => p.color === gameState.winner);
 
     return (
         <SafeAreaView style={styles.container}>
-            {/* ── Top HUD ── */}
+            {/* ── Top Bar ── */}
             <View style={styles.topHud}>
                 <TouchableOpacity onPress={handleBack} style={styles.backButton}>
                     <Text style={styles.backText}>✕</Text>
@@ -126,36 +249,23 @@ export default function GameScreen() {
                     <Text style={styles.turnText}>
                         {isMyTurn ? 'Your turn' : `${currentPlayer.name}'s turn`}
                     </Text>
-                </View>
-                <View style={styles.turnCounter}>
-                    <Text style={styles.turnCounterText}>T{gameState.turnNumber}</Text>
+                    {currentPlayer.isAI && currentPlayer.aiDifficulty && (
+                        <Text style={styles.difficultyBadge}>
+                            {currentPlayer.aiDifficulty === 'casual' ? '😊' :
+                                currentPlayer.aiDifficulty === 'intermediate' ? '🧠' :
+                                    currentPlayer.aiDifficulty === 'expert' ? '👑' : '🏆'}
+                        </Text>
+                    )}
                 </View>
             </View>
 
-            {/* ── Player Status Bar ── */}
-            <View style={styles.playerBar}>
-                {gameState.players.map(player => {
-                    const tokens = getPlayerTokens(gameState, player.color);
-                    const pColors = getPlayerColor(player.color);
-                    const finished = tokens.filter(t => t.state === 'finished').length;
-                    const isActive = player.color === currentPlayer.color;
-
-                    return (
-                        <View key={player.color} style={[
-                            styles.playerChip,
-                            isActive && { borderColor: pColors.primary, backgroundColor: pColors.primary + '15' },
-                        ]}>
-                            <View style={[styles.chipDot, { backgroundColor: pColors.primary }]} />
-                            <Text style={[styles.chipName, isActive && { color: colors.ui.text }]}>
-                                {player.name.length > 6 ? player.name.slice(0, 6) : player.name}
-                            </Text>
-                            <Text style={styles.chipScore}>
-                                {finished}/{tokens.length}
-                            </Text>
-                        </View>
-                    );
-                })}
-            </View>
+            {/* ── Dynamic HUD (replaces static player bar) ── */}
+            <GameHUD
+                players={hudPlayers}
+                stats={matchStats}
+                diceHistory={diceHistory}
+                turnNumber={gameState.turnNumber}
+            />
 
             {/* ── Skia Game Board ── */}
             <View style={styles.boardContainer}>
@@ -168,39 +278,9 @@ export default function GameScreen() {
             </View>
 
             {/* ── Bottom Controls ── */}
-            <View style={styles.controls}>
-                {/* Game Over State */}
-                {gameState.phase === 'finished' ? (
-                    <View style={styles.gameOver}>
-                        <Text style={styles.gameOverEmoji}>🏆</Text>
-                        <Text style={styles.gameOverText}>
-                            {gameState.winner === gameState.players[0].color
-                                ? 'You Win!'
-                                : `${gameState.players.find(p => p.color === gameState.winner)?.name} Wins!`}
-                        </Text>
-                        <View style={styles.gameOverButtons}>
-                            <TouchableOpacity
-                                style={[styles.rematchButton, { backgroundColor: playerColors.primary }]}
-                                onPress={() => {
-                                    const mode = (params.mode as GameMode) || 'classic';
-                                    const matchType = (params.matchType as MatchType) || 'vs_ai';
-                                    startGame(mode, matchType);
-                                }}
-                            >
-                                <Text style={styles.rematchText}>🔄 REMATCH</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.homeButton}
-                                onPress={() => { resetGame(); router.back(); }}
-                            >
-                                <Text style={styles.homeButtonText}>HOME</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                ) : (
-                    /* Active Game Controls */
+            {!isGameOver && (
+                <View style={styles.controls}>
                     <View style={styles.activeControls}>
-                        {/* Dice */}
                         <DiceRenderer
                             currentRoll={gameState.currentDice}
                             isRolling={false}
@@ -209,25 +289,58 @@ export default function GameScreen() {
                             disabled={!isMyTurn || gameState.phase !== 'rolling' || isAnimating}
                         />
 
-                        {/* AI Thinking Indicator */}
                         {gameState.phase === 'rolling' && currentPlayer.isAI && (
                             <Text style={styles.aiText}>🤖 Thinking...</Text>
                         )}
 
-                        {/* Move Selection (when multiple moves available) */}
                         {gameState.phase === 'moving' && gameState.validMoves.length > 1 && isMyTurn && (
                             <View style={styles.moveHint}>
                                 <Text style={styles.moveHintText}>Tap a token on the board to move</Text>
                             </View>
                         )}
 
-                        {/* No moves available */}
                         {gameState.phase === 'moving' && gameState.validMoves.length === 0 && (
                             <Text style={styles.noMovesText}>No valid moves</Text>
                         )}
                     </View>
-                )}
-            </View>
+                </View>
+            )}
+
+            {/* ── Screen Effects Overlay ── */}
+            <ScreenEffects effects={activeEffects} onEffectsConsumed={handleEffectsConsumed} />
+
+            {/* ── Commentary Banner ── */}
+            <CommentaryBanner line={commentary} />
+
+            {/* ── Emote Wheel ── */}
+            <EmoteWheel onEmote={handleEmote} playerColor={playerColors.primary} />
+
+            {/* ── Cinematic Victory Screen ── */}
+            <VictoryScreen
+                isVisible={isGameOver}
+                isWinner={isWinner}
+                winnerName={winnerPlayer?.name ?? ''}
+                winnerColor={playerColors.primary}
+                stats={matchStats}
+                playerName={gameState.players[0].name}
+                xpEarned={isWinner ? 120 : 40}
+                coinsEarned={isWinner ? 250 : 50}
+                hasReplay={!!replayData?.clutchFrameIndex}
+                onPlayReplay={() => {
+                    if (replayData) {
+                        router.push({
+                            pathname: '/replay',
+                            params: { data: serializeReplay(replayData) }
+                        });
+                    }
+                }}
+                onRematch={() => {
+                    const mode = (params.mode as GameMode) || 'classic';
+                    const matchType = (params.matchType as MatchType) || 'vs_ai';
+                    startGame(mode, matchType);
+                }}
+                onHome={() => { resetGame(); router.back(); }}
+            />
         </SafeAreaView>
     );
 }
@@ -284,52 +397,9 @@ const styles = StyleSheet.create({
         fontWeight: typography.weight.semiBold,
         color: colors.ui.text,
     },
-    turnCounter: {
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-        backgroundColor: colors.ui.surface,
-        borderRadius: radii.full,
-    },
-    turnCounterText: {
-        fontSize: typography.size.xs,
-        color: colors.ui.textSecondary,
-        fontWeight: typography.weight.medium,
-    },
-
-    // Player Status Bar
-    playerBar: {
-        flexDirection: 'row',
-        paddingHorizontal: spacing.sm,
-        gap: spacing.xs,
-        marginBottom: spacing.sm,
-    },
-    playerChip: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xs,
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.sm,
-        borderRadius: radii.md,
-        borderWidth: 1,
-        borderColor: colors.ui.border,
-        backgroundColor: colors.ui.surface,
-    },
-    chipDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-    },
-    chipName: {
-        fontSize: typography.size.xs,
-        fontWeight: typography.weight.medium,
-        color: colors.ui.textSecondary,
-        flex: 1,
-    },
-    chipScore: {
-        fontSize: typography.size.xs,
-        fontWeight: typography.weight.bold,
-        color: colors.ui.textTertiary,
+    difficultyBadge: {
+        fontSize: typography.size.base,
+        marginLeft: spacing.xs,
     },
 
     // Board
@@ -367,51 +437,5 @@ const styles = StyleSheet.create({
         fontSize: typography.size.sm,
         color: colors.ui.textTertiary,
         marginTop: spacing.xs,
-    },
-
-    // Game Over
-    gameOver: {
-        alignItems: 'center',
-        paddingVertical: spacing.md,
-    },
-    gameOverEmoji: {
-        fontSize: 48,
-        marginBottom: spacing.xs,
-    },
-    gameOverText: {
-        fontSize: typography.size['2xl'],
-        fontWeight: typography.weight.extraBold,
-        color: colors.ui.gold,
-        marginBottom: spacing.md,
-    },
-    gameOverButtons: {
-        flexDirection: 'row',
-        gap: spacing.md,
-    },
-    rematchButton: {
-        paddingVertical: spacing.md,
-        paddingHorizontal: spacing.xl,
-        borderRadius: radii.xl,
-        ...shadows.md,
-    },
-    rematchText: {
-        fontSize: typography.size.base,
-        fontWeight: typography.weight.bold,
-        color: '#FFFFFF',
-        letterSpacing: 1,
-    },
-    homeButton: {
-        paddingVertical: spacing.md,
-        paddingHorizontal: spacing.xl,
-        borderRadius: radii.xl,
-        backgroundColor: colors.ui.surface,
-        borderWidth: 1,
-        borderColor: colors.ui.border,
-    },
-    homeButtonText: {
-        fontSize: typography.size.base,
-        fontWeight: typography.weight.bold,
-        color: colors.ui.textSecondary,
-        letterSpacing: 1,
     },
 });

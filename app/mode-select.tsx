@@ -18,7 +18,10 @@ import {
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { colors, typography, spacing, radii, shadows } from '../src/theme/design-system';
+import { commonStyles, ON_ACCENT_COLOR } from '../src/theme/commonStyles';
+import { ScreenHeader } from '../src/components/ui';
 import { GameMode, MatchType, AIDifficulty } from '../src/engine/types';
+import { saveLastUsedMode } from '../src/services/StorageService';
 
 type SelectionStep = 'matchType' | 'mode' | 'difficulty';
 
@@ -48,6 +51,14 @@ export default function ModeSelectScreen() {
     const handleMode = (mode: GameMode) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setSelectedMode(mode);
+
+        // Save last used mode for quick resume
+        saveLastUsedMode({
+            mode,
+            matchType: selectedMatch ?? 'vs_ai',
+            difficulty: selectedDifficulty,
+        }).catch(() => { });
+
         router.push({
             pathname: '/game',
             params: {
@@ -183,6 +194,14 @@ export default function ModeSelectScreen() {
                             accent={colors.ui.success}
                             tags={['Relaxed', 'Family']}
                             onPress={() => handleMode('casual')}
+                        />
+                        <OptionCard
+                            icon="⏱️"
+                            title="Quick Ludo"
+                            description="Lightning-fast: 2 tokens, shortened board, 5-minute time limit. Perfect for a quick match!"
+                            accent="#FF6B6B"
+                            tags={['NEW', '5 min', '2 Tokens']}
+                            onPress={() => handleMode('quick')}
                         />
                     </View>
                 )}

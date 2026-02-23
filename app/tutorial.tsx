@@ -18,6 +18,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors, typography, spacing, radii, shadows } from '../src/theme/design-system';
+import { commonStyles, ON_ACCENT_COLOR } from '../src/theme/commonStyles';
+import { ScreenHeader } from '../src/components/ui';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -128,14 +130,17 @@ export default function TutorialScreen() {
     );
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={commonStyles.screen}>
             {/* Header */}
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>HOW TO PLAY</Text>
-                <TouchableOpacity onPress={skip}>
-                    <Text style={styles.skipText}>Skip</Text>
-                </TouchableOpacity>
-            </View>
+            <ScreenHeader
+                title="How to Play"
+                showBack={false}
+                rightElement={
+                    <TouchableOpacity onPress={skip}>
+                        <Text style={styles.skipText}>Skip</Text>
+                    </TouchableOpacity>
+                }
+            />
 
             {/* Carousel */}
             <FlatList

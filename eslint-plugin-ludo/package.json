@@ -1,0 +1,7 @@
+{
+    "name": "eslint-plugin-ludo",
+    "version": "1.0.0",
+    "description": "Custom ESLint rules enforcing Ludo: Legends design system compliance",
+    "main": "index.js",
+    "private": true
+}

@@ -6,7 +6,13 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "eslint . --ext .ts,.tsx --max-warnings 50",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "lint:strict": "eslint . --ext .ts,.tsx --max-warnings 0",
+    "lint:report": "eslint . --ext .ts,.tsx -f json -o lint-report.json || true",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run lint"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
@@ -19,6 +25,7 @@
     "expo-haptics": "~15.0.8",
     "expo-linking": "~8.0.11",
     "expo-router": "~6.0.23",
+    "expo-sensors": "~15.0.8",
     "expo-splash-screen": "^31.0.13",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
@@ -32,6 +39,13 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.0.0",
+    "eslint-plugin-ludo": "file:eslint-plugin-ludo",
+    "eslint-plugin-react": "^7.0.0",
+    "eslint-plugin-react-hooks": "^4.0.0",
+    "eslint-plugin-react-native": "^4.0.0",
     "typescript": "~5.9.2"
   },
   "private": true

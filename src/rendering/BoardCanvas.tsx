@@ -3,8 +3,7 @@
  * 
  * GPU-accelerated game board rendered with @shopify/react-native-skia.
  * Draws the 15×15 Ludo grid, home yards, tracks, home columns, and center.
- * 
- * SME Agent: game-development, ui-ux-pro-max, frontend-design
+ * Supports runtime-swappable themes via BoardThemeEngine.
  */
 
 import React, { useMemo } from 'react';
@@ -12,19 +11,21 @@ import { Canvas, RoundedRect, Circle, Group, LinearGradient, vec, Text as SkiaTe
 import { colors, layout } from '../theme/design-system';
 import { PlayerColor, BOARD } from '../engine/types';
 import { getTrackCoords, getHomeColumnCoords, getHomeYardCoords, isSafePosition, CellCoord } from '../engine/Board';
+import { type BoardTheme, getTheme } from './BoardThemeEngine';
 
 interface BoardCanvasProps {
     size: number;
+    themeId?: string;
 }
 
-export default function BoardCanvas({ size }: BoardCanvasProps) {
+export default function BoardCanvas({ size, themeId }: BoardCanvasProps) {
     const cellSize = size / 15;
-    const padding = 0;
+    const theme = useMemo(() => getTheme(themeId ?? 'classic'), [themeId]);
 
     const trackCoords = useMemo(() => getTrackCoords(), []);
 
     return (
-        <Canvas style={{ width: size, height: size }}>
+        <Group>
             {/* Background */}
             <RoundedRect
                 x={0}
@@ -32,14 +33,14 @@ export default function BoardCanvas({ size }: BoardCanvasProps) {
                 width={size}
                 height={size}
                 r={16}
-                color={colors.board.surface}
+                color={theme.boardSurface}
             />
 
             {/* Home Yards (4 quadrants) */}
-            <HomeYard color="red" cellSize={cellSize} />
-            <HomeYard color="green" cellSize={cellSize} />
-            <HomeYard color="yellow" cellSize={cellSize} />
-            <HomeYard color="blue" cellSize={cellSize} />
+            <HomeYard color="red" cellSize={cellSize} theme={theme} />
+            <HomeYard color="green" cellSize={cellSize} theme={theme} />
+            <HomeYard color="yellow" cellSize={cellSize} theme={theme} />
+            <HomeYard color="blue" cellSize={cellSize} theme={theme} />
 
             {/* Track Cells */}
             {trackCoords.map((coord, i) => (
@@ -49,24 +50,25 @@ export default function BoardCanvas({ size }: BoardCanvasProps) {
                     cellSize={cellSize}
                     isSafe={isSafePosition(i)}
                     globalIndex={i}
+                    theme={theme}
                 />
             ))}
 
             {/* Home Columns */}
-            <HomeColumn color="red" cellSize={cellSize} />
-            <HomeColumn color="green" cellSize={cellSize} />
-            <HomeColumn color="yellow" cellSize={cellSize} />
-            <HomeColumn color="blue" cellSize={cellSize} />
+            <HomeColumn color="red" cellSize={cellSize} theme={theme} />
+            <HomeColumn color="green" cellSize={cellSize} theme={theme} />
+            <HomeColumn color="yellow" cellSize={cellSize} theme={theme} />
+            <HomeColumn color="blue" cellSize={cellSize} theme={theme} />
 
             {/* Center Triangle/Star */}
-            <CenterPiece cellSize={cellSize} />
-        </Canvas>
+            <CenterPiece cellSize={cellSize} theme={theme} />
+        </Group>
     );
 }
 
 // ─── Home Yard (large colored quadrant) ─────────────────────────
 
-function HomeYard({ color, cellSize }: { color: PlayerColor; cellSize: number }) {
+function HomeYard({ color, cellSize, theme }: { color: PlayerColor; cellSize: number; theme: BoardTheme }) {
     const yardPositions: Record<PlayerColor, { x: number; y: number }> = {
         red: { x: 0, y: 9 },
         green: { x: 0, y: 0 },
@@ -76,8 +78,8 @@ function HomeYard({ color, cellSize }: { color: PlayerColor; cellSize: number })
 
     const pos = yardPositions[color];
     const yardSize = cellSize * 6;
-    const yardColor = colors.board.homeYard[color];
-    const borderColor = colors.board.homeColumn[color];
+    const yardColor = theme.homeYard[color];
+    const borderColor = theme.homeColumn[color];
 
     const yardCoords = getHomeYardCoords(color);
 
@@ -135,11 +137,13 @@ function TrackCell({
     cellSize,
     isSafe,
     globalIndex,
+    theme,
 }: {
     coord: CellCoord;
     cellSize: number;
     isSafe: boolean;
     globalIndex: number;
+    theme: BoardTheme;
 }) {
     const x = coord.col * cellSize;
     const y = coord.row * cellSize;
@@ -148,18 +152,18 @@ function TrackCell({
     // Determine if this is a start position
     const isStart = Object.values(BOARD.START_POSITIONS).includes(globalIndex);
 
-    let cellColor: string = colors.board.trackCell;
+    let cellColor: string = theme.trackCell;
     if (isSafe && isStart) {
-        // Start position — use player color
+        // Start position — use player color from theme
         const startColors: Record<number, string> = {
-            [BOARD.START_POSITIONS.red]: colors.player.red,
-            [BOARD.START_POSITIONS.green]: colors.player.green,
-            [BOARD.START_POSITIONS.yellow]: colors.player.yellow,
-            [BOARD.START_POSITIONS.blue]: colors.player.blue,
+            [BOARD.START_POSITIONS.red]: theme.homeColumn.red,
+            [BOARD.START_POSITIONS.green]: theme.homeColumn.green,
+            [BOARD.START_POSITIONS.yellow]: theme.homeColumn.yellow,
+            [BOARD.START_POSITIONS.blue]: theme.homeColumn.blue,
         };
-        cellColor = startColors[globalIndex] ?? colors.board.safeZone;
+        cellColor = startColors[globalIndex] ?? theme.safeZone;
     } else if (isSafe) {
-        cellColor = colors.board.safeZone;
+        cellColor = theme.safeZone;
     }
 
     return (
@@ -178,7 +182,7 @@ function TrackCell({
                 width={cellSize - inset * 2}
                 height={cellSize - inset * 2}
                 r={3}
-                color={colors.board.trackBorder}
+                color={theme.trackBorder}
                 style="stroke"
                 strokeWidth={0.5}
             />
@@ -198,9 +202,9 @@ function TrackCell({
 
 // ─── Home Column ────────────────────────────────────────────────
 
-function HomeColumn({ color, cellSize }: { color: PlayerColor; cellSize: number }) {
+function HomeColumn({ color, cellSize, theme }: { color: PlayerColor; cellSize: number; theme: BoardTheme }) {
     const coords = getHomeColumnCoords(color);
-    const columnColor = colors.board.homeColumn[color];
+    const columnColor = theme.homeColumn[color];
 
     return (
         <Group>
@@ -241,18 +245,9 @@ function HomeColumn({ color, cellSize }: { color: PlayerColor; cellSize: number 
 
 // ─── Center Piece ───────────────────────────────────────────────
 
-function CenterPiece({ cellSize }: { cellSize: number }) {
+function CenterPiece({ cellSize, theme }: { cellSize: number; theme: BoardTheme }) {
     const centerX = 7 * cellSize + cellSize / 2;
     const centerY = 7 * cellSize + cellSize / 2;
-    const triangleSize = cellSize * 1.2;
-
-    // Four colored triangles pointing to center
-    const triangleColors = [
-        colors.player.red,
-        colors.player.green,
-        colors.player.yellow,
-        colors.player.blue,
-    ];
 
     return (
         <Group>
@@ -263,28 +258,28 @@ function CenterPiece({ cellSize }: { cellSize: number }) {
                 width={3 * cellSize}
                 height={3 * cellSize}
                 r={4}
-                color={colors.board.center}
+                color={theme.center}
             />
             {/* Center diamond/star */}
             <Circle
                 cx={centerX}
                 cy={centerY}
                 r={cellSize * 0.8}
-                color={colors.ui.gold}
+                color={theme.centerAccent}
                 opacity={0.15}
             />
             <Circle
                 cx={centerX}
                 cy={centerY}
                 r={cellSize * 0.5}
-                color={colors.ui.gold}
+                color={theme.centerAccent}
                 opacity={0.25}
             />
             <Circle
                 cx={centerX}
                 cy={centerY}
                 r={cellSize * 0.2}
-                color={colors.ui.gold}
+                color={theme.centerAccent}
                 opacity={0.6}
             />
         </Group>
